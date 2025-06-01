@@ -1,5 +1,21 @@
 <template>
   <div class="search-page-container">
+    <!-- Оверлей и расширенная карточка -->
+    <div v-if="selectedCourse" class="overlay" @click.self="closeExpanded">
+      <div class="expanded-card">
+        <h3 class="expanded-title">{{ selectedCourse.title }}</h3>
+        <p class="expanded-description">{{ selectedCourse.description }}</p>
+        <a :href="selectedCourse.url" class="expanded-link" target="_blank">Перейти к курсу</a>
+        <div class="expanded-meta">
+          <span class="expanded-rating">Рейтинг: {{ selectedCourse.rating }}</span>
+          <span class="expanded-price" :class="{ 'free': selectedCourse.price === 0 }">
+            {{ selectedCourse.price === 0 ? 'Бесплатно' : `${formatPrice(selectedCourse.price)} ₽` }}
+          </span>
+        </div>
+        <button class="close-btn" @click="closeExpanded">×</button>
+      </div>
+    </div>
+
     <!-- Верхняя панель поиска -->
     <section class="search-header">
       <div class="search-container">
@@ -22,23 +38,6 @@
       <!-- Боковая панель с фильтрами -->
       <div class="filters-sidebar">
         <h2>Фильтры</h2>
-        
-        <!-- Фильтр по категориям -->
-        <div class="filter-group">
-          <h3>Категории</h3>
-          <div class="filter-options">
-            <div v-for="category in categories" :key="category.id" class="filter-option">
-              <input 
-                type="checkbox" 
-                :id="'category-' + category.id" 
-                v-model="selectedCategories" 
-                :value="category.id"
-                @change="applyFilters"
-              />
-              <label :for="'category-' + category.id">{{ category.name }}</label>
-            </div>
-          </div>
-        </div>
         
         <!-- Фильтр по платформам -->
         <div class="filter-group">
@@ -149,6 +148,14 @@
               <option value="price-desc">По цене (убывание)</option>
               <option value="new">Сначала новые</option>
             </select>
+
+            <label for="per-page-select">Показывать по:</label>
+            <select id="per-page-select" v-model="coursesPerPage" @change="changeItemsPerPage">
+              <option :value="12">12</option>
+              <option :value="24">24</option>
+              <option :value="36">36</option>
+              <option :value="48">48</option>
+            </select>
           </div>
         </div>
         
@@ -165,15 +172,19 @@
         
         <div v-else class="courses-grid">
           <div 
-            v-for="course in filteredCourses" 
+            v-for="course in paginatedCourses" 
             :key="course.id" 
             class="course-card"
+            @click="expandCourse(course)"
           >
-            <div class="course-image">
-              <img :src="course.imageUrl || '/placeholder-course.jpg'" :alt="course.title" />
-              <div class="course-platform">{{ getPlatformName(course.platformId) }}</div>
-              <div v-if="course.isNew" class="new-badge">New</div>
-            </div>
+            <button
+              class="favorite-btn"
+              @click.stop="isFavorite(course.id) ? removeFromFavorites(course.id) : addToFavorites(course.id)"
+              :aria-label="isFavorite(course.id) ? 'Убрать из избранного' : 'В избранное'"
+            >
+              <i :class="[isFavorite(course.id) ? 'fas' : 'far', 'fa-heart']" :style="{ color: isFavorite(course.id) ? '#ef4444' : '#aaa' }"></i>
+            </button>
+            <div class="course-platform">{{ course.platform }}</div>
             <div class="course-info">
               <h3 class="course-title">{{ course.title }}</h3>
               <div class="course-meta">
@@ -181,9 +192,8 @@
                   <span class="stars">★★★★★</span>
                   <span class="rating-value">{{ course.rating }}</span>
                 </span>
-                <span class="course-students">{{ formatStudentCount(course.studentCount) }} студентов</span>
+                <span class="course-students">{{ formatStudentCount(course.reviewsCount) }} отзывов</span>
               </div>
-              <div class="course-category">{{ getCategoryName(course.categoryId) }}</div>
               <div class="course-price" :class="{ 'free': course.price === 0 }">
                 {{ course.price === 0 ? 'Бесплатно' : `${formatPrice(course.price)} ₽` }}
               </div>
@@ -226,19 +236,20 @@
 
 <script>
 import { ref, computed, onMounted, watch } from 'vue';
+import http from '@/services/http';
+import { useAuthStore } from '@/store/auth';
 
 export default {
   name: 'SearchPage',
   setup() {
     // Состояние поиска
     const searchQuery = ref('');
-    const isLoading = ref(false);
     const allCourses = ref([]);
+    const isLoading = ref(false);
     const currentPage = ref(1);
     const coursesPerPage = ref(12);
     
     // Состояние фильтров
-    const selectedCategories = ref([]);
     const selectedPlatforms = ref([]);
     const priceFilters = ref({
       free: false,
@@ -248,27 +259,246 @@ export default {
     const selectedRating = ref('0');
     const sortOption = ref('relevance');
     
-    // Данные категорий и платформ
-    const categories = ref([
-      { id: 1, name: 'Программирование' },
-      { id: 6, name: 'Наука о данных' },
-      { id: 2, name: 'Дизайн' },
-      { id: 3, name: 'Маркетинг' },
-      { id: 4, name: 'Бизнес' },
-      { id: 5, name: 'Иностранные языки' },
-      { id: 7, name: 'Искусство' },
-      { id: 8, name: 'Личная эффективность' }
-    ]);
+    // Данные платформ
+    const platforms = ref([]);
+    const isLoadingPlatforms = ref(false);
     
-    const platforms = ref([
-      { id: 1, name: 'Coursera' },
-      { id: 2, name: 'Udemy' },
-      { id: 3, name: 'Stepik' },
-      { id: 4, name: 'Skillbox' },
-      { id: 5, name: 'Нетология' },
-      { id: 6, name: 'edX' },
-      { id: 7, name: 'GeekBrains' }
-    ]);
+    // В setup() добавляем новое состояние для выбранного курса
+    const selectedCourse = ref(null);
+    
+    // В setup() добавляем состояние и методы для избранного
+    const favorites = ref([]);
+
+    // Функции для работы с избранным
+    const isFavorite = (courseId) => {
+      return favorites.value.some(fav => Number(fav.id) === Number(courseId));
+    };
+
+    const addToFavorites = async (courseId) => {
+      if (!user.value?.id) return;
+
+      // Оптимистичное обновление UI
+      favorites.value.push({ id: courseId });
+    
+      try {
+        const response = await fetch('http://localhost/stepik_parser_test/public/api/v1/favorites/add', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ 
+            user_id: user.value.id, 
+            course_id: courseId 
+          })
+        });
+
+        const data = await response.json();
+        
+        if (!data.success) {
+          favorites.value = favorites.value.filter(fav => Number(fav.id) !== Number(courseId));
+          console.error('Failed to add to favorites:', data.error);
+        }
+      } catch (e) {
+        favorites.value = favorites.value.filter(fav => Number(fav.id) !== Number(courseId));
+        console.error('Network error:', e);
+      }
+    };
+
+    const removeFromFavorites = async (courseId) => {
+      if (!user.value?.id) return;
+
+      const originalFavorites = [...favorites.value];
+      favorites.value = favorites.value.filter(fav => Number(fav.id) !== Number(courseId));
+
+      try {
+        const response = await fetch('http://localhost/stepik_parser_test/public/api/v1/favorites/remove', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({ 
+            user_id: user.value.id, 
+            course_id: courseId 
+          })
+        });
+
+        const data = await response.json();
+        
+        if (!data.success) {
+          favorites.value = originalFavorites;
+          console.error('Failed to remove from favorites:', data.error);
+        }
+      } catch (e) {
+        favorites.value = originalFavorites;
+        console.error('Network error:', e);
+      }
+    };
+
+    // Загрузка избранного при монтировании
+    const fetchFavorites = async () => {
+      if (!user.value?.id) return;
+      try {
+        const res = await fetch(`http://localhost/stepik_parser_test/public/api/v1/favorites?user_id=${user.value.id}`);
+        const data = await res.json();
+        favorites.value = data.favorites || [];
+      } catch (e) {
+        console.error('Error fetching favorites:', e);
+        favorites.value = [];
+      }
+    };
+
+    // Импортируем хранилище авторизации
+    const authStore = useAuthStore();
+    const user = computed(() => authStore.user);
+
+    // Загрузка всех курсов
+    const fetchAllCourses = async () => {
+      isLoading.value = true;
+      try {
+        const response = await fetch('http://localhost/stepik_parser_test/public/api/v1/courses');
+        const responseData = await response.json();
+        
+        if (responseData.success && Array.isArray(responseData.data)) {
+          // Преобразуем данные в нужный формат
+          allCourses.value = responseData.data.map(item => ({
+            id: item.id,
+            title: item.title,
+            rating: Number(item.rating),
+            reviewsCount: item.additional_data?.review_count ?? 0,
+            price: item.additional_data?.price === "Бесплатно" ? 0 : 
+                   parseFloat(item.additional_data?.price?.replace(/[^\d.]/g, '')) || 0,
+            url: item.url,
+            description: item.description,
+            platform: item.additional_data?.platform_name || item.source
+          }));
+        } else {
+          console.error('Неверный формат данных:', responseData);
+          allCourses.value = [];
+        }
+      } catch (e) {
+        console.error('Ошибка при загрузке курсов:', e);
+        allCourses.value = [];
+      } finally {
+        isLoading.value = false;
+      }
+    };
+
+    // Загрузка курсов
+    const fetchCourses = async () => {
+      isLoading.value = true;
+      try {
+        let url = 'http://localhost/stepik_parser_test/public/api/v1/courses';
+        
+        if (selectedPlatforms.value.length > 0) {
+          const platformSources = selectedPlatforms.value
+            .map(id => {
+              const platform = platforms.value.find(p => p.id === id);
+              return platform ? platform.source : null;
+            })
+            .filter(Boolean)
+            .join(',');
+          
+          if (platformSources) {
+            url += `?source=${platformSources}`;
+          }
+        }
+
+        console.log('Fetching courses with URL:', url);
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success && Array.isArray(data.data)) {
+          allCourses.value = data.data.map(item => ({
+            id: item.id,
+            title: item.title,
+            rating: Number(item.rating),
+            reviewsCount: item.additional_data?.review_count ?? 0,
+            price: item.additional_data?.price === "Бесплатно" ? 0 : 
+                   parseFloat(item.additional_data?.price?.replace(/[^\d.]/g, '')) || 0,
+            url: item.url,
+            description: item.description,
+            platform: item.source,
+            platformId: item.additional_data?.platform_id
+          }));
+        }
+      } catch (e) {
+        console.error('Ошибка при загрузке курсов:', e);
+        allCourses.value = [];
+      } finally {
+        isLoading.value = false;
+      }
+    };
+
+    // Поиск курсов
+    const performSearch = async () => {
+      isLoading.value = true;
+      try {
+        let url = `http://localhost/stepik_parser_test/public/api/v1/courses/search?search=${encodeURIComponent(searchQuery.value.trim())}`;
+        
+        if (selectedPlatforms.value.length > 0) {
+          const platformSources = selectedPlatforms.value
+            .map(id => {
+              const platform = platforms.value.find(p => p.id === id);
+              return platform ? platform.source : null;
+            })
+            .filter(Boolean)
+            .join(',');
+          
+          if (platformSources) {
+            url += `&source=${platformSources}`;
+          }
+        }
+
+        console.log('Search URL:', url);
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.success && Array.isArray(data.data)) {
+          allCourses.value = data.data.map(item => ({
+            id: item.id,
+            title: item.title,
+            rating: Number(item.rating),
+            reviewsCount: item.additional_data?.review_count ?? 0,
+            price: item.additional_data?.price === "Бесплатно" ? 0 : 
+                   parseFloat(item.additional_data?.price?.replace(/[^\d.]/g, '')) || 0,
+            url: item.url,
+            description: item.description,
+            platform: item.source,
+            platformId: item.additional_data?.platform_id
+          }));
+        }
+      } catch (e) {
+        console.error('Ошибка при поиске курсов:', e);
+        allCourses.value = [];
+      } finally {
+        isLoading.value = false;
+      }
+    };
+
+    // Загрузка платформ
+    const fetchPlatforms = async () => {
+      isLoadingPlatforms.value = true;
+      try {
+        const response = await fetch('http://localhost/stepik_parser_test/public/api/v1/platforms');
+        const data = await response.json();
+        if (data.success) {
+          platforms.value = data.data.map(platform => ({
+            id: platform.id,
+            name: platform.name, // Оставляем оригинальное имя
+            source: platform.name.toLowerCase() // Добавляем source для API запросов
+          }));
+          console.log('Loaded platforms:', platforms.value);
+          // Выбираем все платформы по умолчанию
+          selectedPlatforms.value = platforms.value.map(p => p.id);
+        }
+      } catch (e) {
+        console.error('Ошибка при загрузке платформ:', e);
+      } finally {
+        isLoadingPlatforms.value = false;
+      }
+    };
     
     // Методы для форматирования данных
     const formatStudentCount = (count) => {
@@ -284,11 +514,6 @@ export default {
       return new Intl.NumberFormat('ru-RU').format(price);
     };
     
-    const getCategoryName = (categoryId) => {
-      const category = categories.value.find(c => c.id === categoryId);
-      return category ? category.name : 'Без категории';
-    };
-    
     const getPlatformName = (platformId) => {
       const platform = platforms.value.find(p => p.id === platformId);
       return platform ? platform.name : 'Неизвестно';
@@ -297,22 +522,6 @@ export default {
     // Вычисляемые свойства
     const filteredCourses = computed(() => {
       let result = [...allCourses.value];
-      
-      // Фильтрация по поисковому запросу
-      if (searchQuery.value.trim()) {
-        const query = searchQuery.value.toLowerCase();
-        result = result.filter(course => 
-          course.title.toLowerCase().includes(query) ||
-          getCategoryName(course.categoryId).toLowerCase().includes(query)
-        );
-      }
-      
-      // Фильтрация по категориям
-      if (selectedCategories.value.length > 0) {
-        result = result.filter(course => 
-          selectedCategories.value.includes(course.categoryId)
-        );
-      }
       
       // Фильтрация по платформам
       if (selectedPlatforms.value.length > 0) {
@@ -377,22 +586,12 @@ export default {
     });
     
     // Методы
-    const performSearch = () => {
-      isLoading.value = true;
+    const applyFilters = async () => {
       currentPage.value = 1;
-      
-      // В реальном приложении здесь был бы API запрос
-      setTimeout(() => {
-        isLoading.value = false;
-      }, 800);
-    };
-    
-    const applyFilters = () => {
-      currentPage.value = 1;
+      await performSearch();
     };
     
     const resetFilters = () => {
-      selectedCategories.value = [];
       selectedPlatforms.value = [];
       priceFilters.value = {
         free: false,
@@ -414,6 +613,10 @@ export default {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     };
     
+    const changeItemsPerPage = () => {
+      currentPage.value = 1; // Сбрасываем на первую страницу при изменении количества элементов
+    };
+    
     // Наблюдатель за изменением поискового запроса
     watch(searchQuery, (newValue, oldValue) => {
       if (newValue !== oldValue && oldValue) {
@@ -423,228 +626,9 @@ export default {
     
     // Загрузка данных при монтировании компонента
     onMounted(async () => {
-      isLoading.value = true;
-      
-      try {
-        // Имитация загрузки данных
-        setTimeout(() => {
-          // Моковые данные для примера
-          allCourses.value = [
-            {
-              id: 1,
-              title: 'Основы программирования на Python',
-              platformId: 3,
-              categoryId: 1,
-              price: 0,
-              rating: 4.8,
-              studentCount: 154000,
-              imageUrl: '/images/courses/python-basics.jpg',
-              isNew: false
-            },
-            {
-              id: 2,
-              title: 'UX/UI дизайн: с нуля до PRO',
-              platformId: 4,
-              categoryId: 2,
-              price: 45000,
-              rating: 4.7,
-              studentCount: 32500,
-              imageUrl: '/images/courses/ux-ui-design.jpg',
-              isNew: false
-            },
-            {
-              id: 3,
-              title: 'Маркетинг в социальных сетях',
-              platformId: 2,
-              categoryId: 3,
-              price: 12000,
-              rating: 4.6,
-              studentCount: 87300,
-              imageUrl: '/images/courses/social-marketing.jpg',
-              isNew: false
-            },
-            {
-              id: 4,
-              title: 'Анализ данных в Excel и Power BI',
-              platformId: 1,
-              categoryId: 6,
-              price: 8000,
-              rating: 4.9,
-              studentCount: 65800,
-              imageUrl: '/images/courses/data-analysis.jpg',
-              isNew: false
-            },
-            {
-              id: 5,
-              title: 'React для начинающих: полное руководство',
-              platformId: 2,
-              categoryId: 1,
-              price: 3500,
-              rating: 4.7,
-              studentCount: 1200,
-              imageUrl: '/images/courses/react-beginners.jpg',
-              isNew: true
-            },
-            {
-              id: 6,
-              title: 'Финансовая грамотность для всех',
-              platformId: 5,
-              categoryId: 4,
-              price: 0,
-              rating: 4.5,
-              studentCount: 3500,
-              imageUrl: '/images/courses/finance.jpg',
-              isNew: true
-            },
-            {
-              id: 7,
-              title: 'Промышленный дизайн от А до Я',
-              platformId: 4,
-              categoryId: 2,
-              price: 56000,
-              rating: 4.8,
-              studentCount: 750,
-              imageUrl: '/images/courses/industrial-design.jpg',
-              isNew: true
-            },
-            {
-              id: 8,
-              title: 'Английский для IT-специалистов',
-              platformId: 3,
-              categoryId: 5,
-              price: 9900,
-              rating: 4.6,
-              studentCount: 2100,
-              imageUrl: '/images/courses/english-it.jpg',
-              isNew: true
-            },
-            {
-              id: 9,
-              title: 'Машинное обучение для начинающих',
-              platformId: 1,
-              categoryId: 6,
-              price: 18000,
-              rating: 4.9,
-              studentCount: 5600,
-              imageUrl: '/images/courses/machine-learning.jpg',
-              isNew: false
-            },
-            {
-              id: 10,
-              title: 'JavaScript: полный курс',
-              platformId: 2,
-              categoryId: 1,
-              price: 7500,
-              rating: 4.7,
-              studentCount: 42000,
-              imageUrl: '/images/courses/javascript.jpg',
-              isNew: false
-            },
-            {
-              id: 11,
-              title: 'Основы веб-дизайна',
-              platformId: 5,
-              categoryId: 2,
-              price: 15000,
-              rating: 4.4,
-              studentCount: 8500,
-              imageUrl: '/images/courses/web-design.jpg',
-              isNew: false
-            },
-            {
-              id: 12,
-              title: 'MySQL для разработчиков',
-              platformId: 7,
-              categoryId: 1,
-              price: 11000,
-              rating: 4.5,
-              studentCount: 6800,
-              imageUrl: '/images/courses/mysql.jpg',
-              isNew: false
-            },
-            {
-              id: 13,
-              title: 'Искусство фотографии',
-              platformId: 2,
-              categoryId: 7,
-              price: 5500,
-              rating: 4.8,
-              studentCount: 15600,
-              imageUrl: '/images/courses/photography.jpg',
-              isNew: false
-            },
-            {
-              id: 14,
-              title: 'Тайм-менеджмент: управление временем',
-              platformId: 5,
-              categoryId: 8,
-              price: 4000,
-              rating: 4.6,
-              studentCount: 21000,
-              imageUrl: '/images/courses/time-management.jpg',
-              isNew: false
-            },
-            {
-              id: 15,
-              title: 'Испанский язык для начинающих',
-              platformId: 3,
-              categoryId: 5,
-              price: 6500,
-              rating: 4.4,
-              studentCount: 9200,
-              imageUrl: '/images/courses/spanish.jpg',
-              isNew: false
-            },
-            {
-              id: 16,
-              title: 'Искусство публичных выступлений',
-              platformId: 4,
-              categoryId: 8,
-              price: 13500,
-              rating: 4.7,
-              studentCount: 11500,
-              imageUrl: '/images/courses/public-speaking.jpg',
-              isNew: false
-            },
-            {
-              id: 17,
-              title: 'Data Science: основы и практика',
-              platformId: 6,
-              categoryId: 6,
-              price: 22000,
-              rating: 4.9,
-              studentCount: 7800,
-              imageUrl: '/images/courses/data-science.jpg',
-              isNew: true
-            },
-            {
-              id: 18,
-              title: 'Контент-маркетинг в соцсетях',
-              platformId: 2,
-              categoryId: 3,
-              price: 8900,
-              rating: 4.3,
-              studentCount: 3800,
-              imageUrl: '/images/courses/content-marketing.jpg',
-              isNew: true
-            }
-          ];
-          
-          isLoading.value = false;
-          
-          // Если пришли со страницы с поисковым запросом, выполним поиск
-          const urlParams = new URLSearchParams(window.location.search);
-          const queryParam = urlParams.get('q');
-          if (queryParam) {
-            searchQuery.value = queryParam;
-            performSearch();
-          }
-        }, 1000);
-        
-      } catch (error) {
-        console.error('Ошибка при загрузке данных:', error);
-        isLoading.value = false;
-      }
+      await fetchAllCourses();
+      await fetchPlatforms();
+      await fetchFavorites();
     });
     
     const searchInput = ref(null);
@@ -666,18 +650,24 @@ export default {
       window.addEventListener('focus-search-input', focusSearchInput);
     });
     
+    const expandCourse = (course) => {
+      selectedCourse.value = course;
+    };
+
+    const closeExpanded = () => {
+      selectedCourse.value = null;
+    };
+    
     return {
       // Состояние
       searchQuery,
-      isLoading,
       allCourses,
+      isLoading,
       currentPage,
-      selectedCategories,
       selectedPlatforms,
       priceFilters,
       selectedRating,
       sortOption,
-      categories,
       platforms,
       
       // Вычисляемые свойства
@@ -688,7 +678,6 @@ export default {
       // Методы
       formatStudentCount,
       formatPrice,
-      getCategoryName,
       getPlatformName,
       performSearch,
       applyFilters,
@@ -696,7 +685,16 @@ export default {
       applySorting,
       changePage,
       searchInput,
-      searchInputGlow
+      searchInputGlow,
+      selectedCourse,
+      expandCourse,
+      closeExpanded,
+      isFavorite,
+      addToFavorites,
+      removeFromFavorites,
+      favorites,
+      coursesPerPage,
+      changeItemsPerPage
     };
   }
 };
@@ -883,21 +881,25 @@ export default {
     h2 {
       font-size: 22px;
       color: #1f2937;
+      margin-right: auto;
     }
     
     .results-count {
       color: #6b7280;
       font-size: 14px;
+      margin-right: 20px;
     }
     
     .sorting-options {
       display: flex;
       align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
       
       label {
-        margin-right: 10px;
         color: #4b5563;
         font-size: 14px;
+        white-space: nowrap;
       }
       
       select {
@@ -907,10 +909,16 @@ export default {
         font-size: 14px;
         color: #374151;
         cursor: pointer;
+        min-width: 100px;
+        background: white;
         
         &:focus {
           outline: none;
           border-color: #2563eb;
+        }
+        
+        &:hover {
+          border-color: #d1d5db;
         }
       }
     }
@@ -963,74 +971,48 @@ export default {
   
   .courses-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 25px;
+    max-width: 100%;
     
     .course-card {
+      background: white;
       border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
       overflow: hidden;
-      transition: transform 0.3s, box-shadow 0.3s;
-      cursor: pointer;
+      transition: transform 0.3s;
+      position: relative;
       
       &:hover {
         transform: translateY(-5px);
-        box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
       }
       
-      .course-image {
-        position: relative;
-        height: 160px;
-        overflow: hidden;
-        
-        img {
-          width: 100%;
-          height: 100%;
-          object-fit: cover;
-        }
-        
-        .course-platform {
-          position: absolute;
-          top: 10px;
-          left: 10px;
-          background: rgba(0, 0, 0, 0.6);
-          color: white;
-          padding: 4px 8px;
-          font-size: 12px;
-          border-radius: 4px;
-        }
-        
-        .new-badge {
-          position: absolute;
-          top: 10px;
-          right: 10px;
-          background: #dc2626;
-          color: white;
-          padding: 4px 8px;
-          font-size: 12px;
-          border-radius: 4px;
-        }
+      .course-platform {
+        position: absolute;
+        bottom: 10%;
+        right: 0%;
+        background: rgba(0, 0, 0, 0.6);
+        color: white;
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 12px;
+        z-index: 2;
       }
       
       .course-info {
         padding: 15px;
         
-.course-title {
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 10px;
-  color: #1f2937;
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2; /* стандартное свойство для будущей поддержки */
-  overflow: hidden;
-}
-
+        .course-title {
+          font-size: 16px;
+          font-weight: 600;
+          margin-bottom: 10px;
+          color: #1f2937;
+        }
+        
         .course-meta {
           display: flex;
           justify-content: space-between;
-          margin-bottom: 8px;
+          margin-bottom: 10px;
           font-size: 14px;
           
           .course-rating {
@@ -1046,16 +1028,6 @@ export default {
               color: #4b5563;
             }
           }
-          
-          .course-students {
-            color: #6b7280;
-          }
-        }
-        
-        .course-category {
-          color: #4b5563;
-          font-size: 14px;
-          margin-bottom: 8px;
         }
         
         .course-price {
@@ -1076,40 +1048,12 @@ export default {
     justify-content: center;
     align-items: center;
     margin-top: 40px;
-    
-    button {
-      padding: 8px 12px;
-      border: 1px solid #e5e7eb;
-      background: white;
-      color: #4b5563;
-      cursor: pointer;
-      transition: all 0.3s;
-      
-      &:hover:not(:disabled) {
-        background: #f3f4f6;
-        border-color: #d1d5db;
-      }
-      
-      &:disabled {
-        opacity: 0.5;
-        cursor: not-allowed;
-      }
-      
-      &.active {
-        background: #2563eb;
-        color: white;
-        border-color: #2563eb;
-      }
-    }
-    
-    .pagination-prev,
-    .pagination-next {
-      border-radius: 4px;
-    }
+    flex-wrap: wrap;
     
     .pagination-numbers {
       display: flex;
       margin: 0 10px;
+      flex-wrap: wrap;
       
       button {
         width: 40px;
@@ -1119,7 +1063,191 @@ export default {
         display: flex;
         align-items: center;
         justify-content: center;
+        border: 1px solid #e5e7eb;
+        background: white;
+        color: #4b5563;
+        cursor: pointer;
+        transition: all 0.3s;
+        
+        &:hover:not(:disabled) {
+          background: #f3f4f6;
+        }
+        
+        &:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
+        }
+        
+        &.active {
+          background: #2563eb;
+          color: white;
+          border-color: #2563eb;
+        }
       }
+    }
+    
+    .pagination-prev,
+    .pagination-next {
+      padding: 8px 16px;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      background: white;
+      color: #4b5563;
+      cursor: pointer;
+      transition: all 0.3s;
+      
+      &:hover:not(:disabled) {
+        background: #f3f4f6;
+      }
+      
+      &:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+    }
+  }
+}
+
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0,0,0,0.5);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.expanded-card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+  padding: 32px 32px 24px 32px;
+  max-width: 420px;
+  width: 90vw;
+  position: relative;
+  animation: expandIn 0.25s cubic-bezier(0.4,0,0.2,1);
+}
+
+@keyframes expandIn {
+  from { transform: scale(0.8); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+.expanded-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 1rem;
+  color: #1f2937;
+}
+
+.expanded-description {
+  font-size: 1rem;
+  color: #374151;
+  margin-bottom: 1.2rem;
+}
+
+.expanded-link {
+  display: inline-block;
+  margin-bottom: 1.2rem;
+  color: #2563eb;
+  text-decoration: underline;
+  font-weight: 500;
+}
+
+.expanded-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 1.2rem;
+}
+
+.expanded-rating {
+  color: #f59e0b;
+  font-weight: 600;
+}
+
+.expanded-price {
+  font-weight: 600;
+  font-size: 1.1rem;
+  color: #111827;
+
+  &.free {
+    color: #059669;
+  }
+}
+
+.close-btn {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  background: none;
+  border: none;
+  font-size: 2rem;
+  color: #6b7280;
+  cursor: pointer;
+  transition: color 0.2s;
+
+  &:hover {
+    color: #111827;
+  }
+}
+
+.favorite-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: white;
+  border: none;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+  cursor: pointer;
+  z-index: 2;
+  transition: background 0.2s;
+}
+
+.favorite-btn:hover {
+  background: #f3f4f6;
+}
+
+@media (max-width: 768px) {
+  .search-content {
+    flex-direction: column;
+  }
+  
+  .filters-sidebar {
+    width: 100%;
+  }
+  
+  .courses-grid {
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  }
+  
+  .pagination {
+    .pagination-numbers {
+      button {
+        width: 35px;
+        height: 35px;
+        margin: 0 3px;
+      }
+    }
+  }
+  
+  .results-header {
+    flex-direction: column;
+    align-items: flex-start;
+    
+    .sorting-options {
+      width: 100%;
+      justify-content: space-between;
     }
   }
 }

@@ -111,59 +111,71 @@
             <div class="tab-header">
               <h2>Настройки профиля</h2>
             </div>
-            <form class="settings-form" @submit.prevent="saveProfile">
+            <form class="settings-form">
               <div class="form-section">
-                <h3>Личные данные</h3>
-                <div class="form-group">
-                  <label for="firstName">Имя</label>
-                  <input type="text" id="firstName" v-model="profileForm.firstName" required>
+                <h3>Основные настройки</h3>
+                <div class="form-group" :class="{ 'has-error': profileErrors.nickname }">
+                  <label for="nickname">Отображаемое имя <span class="required">*</span></label>
+                  <input 
+                    type="text" 
+                    id="nickname" 
+                    v-model="profileForm.nickname" 
+                    placeholder="Как вас будут видеть другие пользователи"
+                    required
+                    @input="clearProfileError('nickname')"
+                  >
+                  <span class="error-message" v-if="profileErrors.nickname">{{ profileErrors.nickname }}</span>
                 </div>
-                <div class="form-group">
-                  <label for="lastName">Фамилия</label>
-                  <input type="text" id="lastName" v-model="profileForm.lastName" required>
+                <div class="form-group" :class="{ 'has-error': profileErrors.email }">
+                  <label for="email">Email <span class="required">*</span></label>
+                  <input 
+                    type="email" 
+                    id="email" 
+                    v-model="profileForm.email" 
+                    required
+                    @input="clearProfileError('email')"
+                  >
+                  <span class="error-message" v-if="profileErrors.email">{{ profileErrors.email }}</span>
                 </div>
-                <div class="form-group">
-                  <label for="email">Email</label>
-                  <input type="email" id="email" v-model="profileForm.email" required>
-                </div>
-                <div class="form-group">
-                  <label for="phone">Телефон</label>
-                  <input type="tel" id="phone" v-model="profileForm.phone">
+                <div class="form-actions">
+                  <button type="button" class="btn btn-primary" @click="updateProfile">Сохранить профиль</button>
+                  <button type="button" class="btn btn-outline" @click="resetProfileForm">Отменить</button>
                 </div>
               </div>
+              
               <div class="form-section">
-                <h3>Безопасность</h3>
+                <h3>Изменение пароля</h3>
                 <div class="form-group">
                   <label for="currentPassword">Текущий пароль</label>
-                  <input type="password" id="currentPassword" v-model="profileForm.currentPassword">
+                  <input 
+                    type="password" 
+                    id="currentPassword" 
+                    v-model="passwordForm.currentPassword"
+                    placeholder="Введите текущий пароль"
+                  >
                 </div>
                 <div class="form-group">
                   <label for="newPassword">Новый пароль</label>
-                  <input type="password" id="newPassword" v-model="profileForm.newPassword">
+                  <input 
+                    type="password" 
+                    id="newPassword" 
+                    v-model="passwordForm.newPassword"
+                    placeholder="Введите новый пароль"
+                  >
                 </div>
                 <div class="form-group">
                   <label for="confirmPassword">Подтвердите пароль</label>
-                  <input type="password" id="confirmPassword" v-model="profileForm.confirmPassword">
+                  <input 
+                    type="password" 
+                    id="confirmPassword" 
+                    v-model="passwordForm.confirmPassword"
+                    placeholder="Подтвердите новый пароль"
+                  >
                 </div>
-              </div>
-              <div class="form-section">
-                <h3>Уведомления</h3>
-                <div class="form-check">
-                  <input type="checkbox" id="emailNotifications" v-model="profileForm.emailNotifications">
-                  <label for="emailNotifications">Получать уведомления по email</label>
+                <div class="form-actions">
+                  <button type="button" class="btn btn-primary" @click="updatePassword">Изменить пароль</button>
+                  <button type="button" class="btn btn-outline" @click="resetPasswordForm">Отменить</button>
                 </div>
-                <div class="form-check">
-                  <input type="checkbox" id="courseUpdates" v-model="profileForm.courseUpdates">
-                  <label for="courseUpdates">Уведомления об обновлениях курсов</label>
-                </div>
-                <div class="form-check">
-                  <input type="checkbox" id="promotions" v-model="profileForm.promotions">
-                  <label for="promotions">Акции и специальные предложения</label>
-                </div>
-              </div>
-              <div class="form-actions">
-                <button type="submit" class="btn btn-primary">Сохранить изменения</button>
-                <button type="button" class="btn btn-outline">Отменить</button>
               </div>
             </form>
           </div>
@@ -177,16 +189,65 @@
 import { ref, onMounted, computed } from 'vue';
 import { useAuthStore } from '@/store/auth';
 import http from '@/services/http';
+import { useRoute } from 'vue-router';
+import { useToast } from 'vue-toastification';
 
 export default {
   name: 'ProfilePage',
   setup() {
+    const route = useRoute();
     const authStore = useAuthStore();
     const user = computed(() => authStore.user);
+    const toast = useToast();
+    
+    // Разделяем формы на две
+    const profileForm = ref({
+      nickname: user.value?.name || '',
+      email: user.value?.email || ''
+    });
+
+    const passwordForm = ref({
+      currentPassword: '',
+      newPassword: '',
+      confirmPassword: ''
+    });
+
     const favoritesSearchQuery = ref('');
     const favorites = ref([]);
     const activeTab = ref('recent');
     const recentlyViewedCourses = ref([]);
+
+    const profileErrors = ref({
+      nickname: '',
+      email: ''
+    });
+
+    const clearProfileError = (field) => {
+      profileErrors.value[field] = '';
+    };
+
+    const validateProfileForm = () => {
+      let isValid = true;
+      profileErrors.value = {
+        nickname: '',
+        email: ''
+      };
+
+      if (!profileForm.value.nickname.trim()) {
+        profileErrors.value.nickname = 'Отображаемое имя обязательно для заполнения';
+        isValid = false;
+      }
+
+      if (!profileForm.value.email.trim()) {
+        profileErrors.value.email = 'Email обязателен для заполнения';
+        isValid = false;
+      } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(profileForm.value.email)) {
+        profileErrors.value.email = 'Введите корректный email адрес';
+        isValid = false;
+      }
+
+      return isValid;
+    };
 
     const menuItems = [
       { id: 'recent', title: 'Недавно просмотренные', icon: 'fa-history' },
@@ -265,25 +326,116 @@ export default {
       activeTab.value = tabId;
     };
 
-    const saveProfile = () => {
-      // Здесь была бы валидация и отправка формы на сервер
-      alert('Профиль успешно обновлен');
-      // Обновляем данные пользователя (пример для MVP)
-      if (user.value) {
-        user.value.firstName = profileForm.value.firstName;
-        user.value.lastName = profileForm.value.lastName;
-        user.value.name = `${profileForm.value.firstName} ${profileForm.value.lastName}`;
-        user.value.email = profileForm.value.email;
-        user.value.phone = profileForm.value.phone;
+    // Отдельные методы сброса для каждой формы
+    const resetProfileForm = () => {
+      profileForm.value = {
+        nickname: user.value?.name || '',
+        email: user.value?.email || ''
+      };
+    };
+
+    const resetPasswordForm = () => {
+      passwordForm.value = {
+        currentPassword: '',
+        newPassword: '',
+        confirmPassword: ''
+      };
+    };
+
+    // Отдельный метод для обновления профиля
+    const updateProfile = async () => {
+      if (!validateProfileForm()) {
+        toast.error('Пожалуйста, заполните все обязательные поля');
+        return;
       }
-      // Сброс полей пароля
-      profileForm.value.currentPassword = '';
-      profileForm.value.newPassword = '';
-      profileForm.value.confirmPassword = '';
+
+      try {
+        if (profileForm.value.nickname !== user.value?.name || 
+            profileForm.value.email !== user.value?.email) {
+          const profileResponse = await fetch('http://localhost/stepik_parser_test/public/api/v1/user/profile', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify({
+              nickname: profileForm.value.nickname,
+              email: profileForm.value.email
+            })
+          });
+          
+          const profileData = await profileResponse.json();
+          if (profileData.success) {
+            user.value.name = profileForm.value.nickname;
+            user.value.email = profileForm.value.email;
+            toast.success('Профиль успешно обновлен');
+          } else {
+            if (profileData.errors) {
+              // Обработка ошибок валидации с сервера
+              Object.keys(profileData.errors).forEach(field => {
+                profileErrors.value[field] = profileData.errors[field][0];
+              });
+              toast.error('Пожалуйста, исправьте ошибки в форме');
+            } else {
+              toast.error(profileData.message || 'Ошибка при обновлении профиля');
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error updating profile:', error);
+        toast.error('Произошла ошибка при обновлении профиля');
+      }
+    };
+
+    // Отдельный метод для обновления пароля
+    const updatePassword = async () => {
+      try {
+        // Проверяем наличие всех полей
+        if (!passwordForm.value.currentPassword || 
+            !passwordForm.value.newPassword || 
+            !passwordForm.value.confirmPassword) {
+          toast.error('Заполните все поля для смены пароля');
+          return;
+        }
+
+        // Проверяем совпадение паролей
+        if (passwordForm.value.newPassword !== passwordForm.value.confirmPassword) {
+          toast.error('Новый пароль и подтверждение не совпадают');
+          return;
+        }
+
+        const passwordResponse = await fetch('http://localhost/stepik_parser_test/public/api/v1/user/password', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            current_password: passwordForm.value.currentPassword,
+            new_password: passwordForm.value.newPassword,
+            confirm_password: passwordForm.value.confirmPassword
+          })
+        });
+        
+        const passwordData = await passwordResponse.json();
+        if (passwordData.success) {
+          resetPasswordForm(); // Очищаем форму при успехе
+          toast.success('Пароль успешно изменен');
+        } else {
+          toast.error(passwordData.message || 'Ошибка при смене пароля');
+        }
+      } catch (error) {
+        console.error('Error updating password:', error);
+        toast.error('Произошла ошибка при смене пароля');
+      }
     };
 
     onMounted(() => {
       fetchFavorites();
+      const tabFromUrl = route.query.tab;
+      if (tabFromUrl && ['recent', 'favorites', 'collections', 'settings'].includes(tabFromUrl)) {
+        activeTab.value = tabFromUrl;
+      }
     });
 
     return {
@@ -296,19 +448,14 @@ export default {
       setActiveTab,
       removeFromFavorites,
       formatStudentCount,
-      saveProfile,
-      profileForm: ref({
-        firstName: '',
-        lastName: '',
-        email: '',
-        phone: '',
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: '',
-        emailNotifications: true,
-        courseUpdates: true,
-        promotions: false
-      })
+      updateProfile,
+      updatePassword,
+      resetProfileForm,
+      resetPasswordForm,
+      profileForm,
+      passwordForm,
+      profileErrors,
+      clearProfileError
     };
   }
 };
@@ -915,5 +1062,22 @@ export default {
   .certificates-list {
     grid-template-columns: 1fr;
   }
+}
+
+.form-group.has-error input {
+  border-color: #ef4444;
+  background-color: #fff5f5;
+}
+
+.error-message {
+  color: #ef4444;
+  font-size: 12px;
+  margin-top: 5px;
+  display: block;
+}
+
+.required {
+  color: #ef4444;
+  margin-left: 2px;
 }
 </style>

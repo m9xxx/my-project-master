@@ -33,28 +33,6 @@
       </div>
     </section>
 
-    <!-- Популярные категории -->
-    <section class="categories-section">
-      <div class="section-header">
-        <h2>Популярные категории</h2>
-        <span class="view-all">Смотреть все</span>
-      </div>
-      
-      <div class="categories-grid">
-        <div 
-          v-for="category in popularCategories" 
-          :key="category.id" 
-          class="category-card"
-        >
-          <div class="category-icon">
-            <i :class="category.icon"></i>
-          </div>
-          <h3>{{ category.name }}</h3>
-          <p>{{ category.coursesCount }} курсов</p>
-        </div>
-      </div>
-    </section>
-
     <!-- Популярные курсы -->
     <section class="featured-courses">
       <div class="section-header">
@@ -224,6 +202,31 @@ export default {
 
     const expandCourse = (course) => {
       selectedCourse.value = course;
+      // Сохраняем курс в историю просмотров
+      if (user.value?.id) {
+        const storageKey = `recently_viewed_${user.value.id}`;
+        let recentlyViewed = JSON.parse(localStorage.getItem(storageKey) || '[]');
+        
+        // Удаляем курс из истории, если он там уже есть
+        recentlyViewed = recentlyViewed.filter(item => item.id !== course.id);
+        
+        // Добавляем курс в начало массива
+        recentlyViewed.unshift({
+          id: course.id,
+          title: course.title,
+          rating: course.rating,
+          reviewsCount: course.reviewsCount,
+          price: course.price,
+          url: course.url,
+          description: course.description,
+          platform: course.platform
+        });
+        
+        // Ограничиваем список 20 последними курсами
+        recentlyViewed = recentlyViewed.slice(0, 20);
+        
+        localStorage.setItem(storageKey, JSON.stringify(recentlyViewed));
+      }
     };
     const closeExpanded = () => {
       selectedCourse.value = null;

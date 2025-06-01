@@ -10,7 +10,7 @@
         <div class="nav-links">
           <router-link to="/" class="nav-link" exact-active-class="active">Главная</router-link>
           <router-link to="/search" class="nav-link" active-class="active">Поиск</router-link>
-          <router-link to="/favorites" class="nav-link" active-class="active">Избранное</router-link>
+          <router-link to="/profile?tab=favorites" class="nav-link" active-class="active">Избранное</router-link>
         </div>
         <div class="user-menu">
           <div class="search-icon" @click="goToSearch">
