@@ -100,9 +100,74 @@
             <div class="tab-header">
               <h2>Подборки</h2>
             </div>
-            <div class="empty-state">
+            <div v-if="playlists.length === 0" class="empty-state">
               <i class="fas fa-layer-group"></i>
-              <p>Здесь появятся ваши подборки курсов</p>
+              <p>У вас пока нет подборок</p>
+              <router-link to="/" class="btn btn-primary">Найти курсы</router-link>
+            </div>
+            <div v-else class="playlists-grid">
+              <div 
+                v-for="playlist in playlists" 
+                :key="playlist.id" 
+                class="playlist-card"
+                @click="showPlaylistDetails(playlist)"
+              >
+                <h3 class="playlist-title">{{ playlist.name }}</h3>
+                <p class="playlist-description">{{ truncateText(playlist.description || 'Без описания', 50) }}</p>
+                <div class="playlist-meta">
+                  <span class="course-count">
+                    <i class="fas fa-book"></i>
+                    {{ playlist.course_count || 0 }} курсов
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Оверлей с деталями плейлиста -->
+            <div v-if="selectedPlaylist" class="overlay" @click.self="closePlaylistDetails">
+              <div class="expanded-playlist">
+                <button class="close-btn" @click="closePlaylistDetails">×</button>
+                <h3 class="expanded-title">{{ selectedPlaylist.name }}</h3>
+                <p class="expanded-description">{{ selectedPlaylist.description || 'Без описания' }}</p>
+                
+                <div class="playlist-courses">
+                  <h4>Курсы в подборке</h4>
+                  <div v-if="selectedPlaylist.courses && selectedPlaylist.courses.length > 0" class="courses-grid">
+                    <div 
+                      v-for="course in selectedPlaylist.courses" 
+                      :key="course.id" 
+                      class="course-card"
+                    >
+                      <button
+                        class="favorite-btn"
+                        @click.stop="isFavorite(course.id) ? removeFromFavorites(course.id) : addToFavorites(course.id)"
+                        :aria-label="isFavorite(course.id) ? 'Убрать из избранного' : 'В избранное'"
+                      >
+                        <i :class="[isFavorite(course.id) ? 'fas' : 'far', 'fa-heart']" :style="{ color: isFavorite(course.id) ? '#ef4444' : '#aaa' }"></i>
+                      </button>
+
+                      <div class="course-platform">{{ course.platform }}</div>
+                      <div class="course-info">
+                        <h3 class="course-title">{{ course.title }}</h3>
+                        <div class="course-meta">
+                          <span class="course-rating">
+                            <span class="stars">★★★★★</span>
+                            <span class="rating-value">{{ course.rating }}</span>
+                          </span>
+                          <span class="course-students">{{ formatStudentCount(course.reviewsCount) }} отзывов</span>
+                        </div>
+                        <div class="course-price" :class="{ 'free': course.price === 0 }">
+                          {{ course.price === 0 ? 'Бесплатно' : `${course.price} ₽` }}
+                        </div>
+                        <a :href="course.url" target="_blank" class="btn btn-primary">Перейти к курсу</a>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-else class="empty-state">
+                    <p>В этой подборке пока нет курсов</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           
@@ -186,16 +251,18 @@
 </template>
 
 <script>
-import { ref, onMounted, computed } from 'vue';
+import { ref, onMounted, computed, watch } from 'vue';
 import { useAuthStore } from '@/store/auth';
 import http from '@/services/http';
-import { useRoute } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { useToast } from 'vue-toastification';
+import { usePlaylistsStore } from '@/store/playlists';
 
 export default {
   name: 'ProfilePage',
   setup() {
     const route = useRoute();
+    const router = useRouter();
     const authStore = useAuthStore();
     const user = computed(() => authStore.user);
     const toast = useToast();
@@ -324,6 +391,15 @@ export default {
 
     const setActiveTab = (tabId) => {
       activeTab.value = tabId;
+      // Обновляем URL с новым значением вкладки
+      const currentQuery = { ...route.query };
+      currentQuery.tab = tabId;
+      router.push({ query: currentQuery });
+    };
+
+    // Добавляем функцию проверки избранного
+    const isFavorite = (courseId) => {
+      return favorites.value.some(fav => Number(fav.id) === Number(courseId));
     };
 
     // Отдельные методы сброса для каждой формы
@@ -430,11 +506,83 @@ export default {
       }
     };
 
+    const playlistsStore = usePlaylistsStore();
+    const playlists = ref([]);
+    const selectedPlaylist = ref(null);
+
+    const truncateText = (text, length) => {
+      if (text.length <= length) return text;
+      return text.substring(0, length) + '...';
+    };
+
+    const showPlaylistDetails = async (playlist) => {
+      selectedPlaylist.value = playlist;
+      // Если курсы еще не загружены, загружаем их
+      if (!playlist.courses) {
+        try {
+          const response = await fetch(`http://localhost/stepik_parser_test/public/api/v1/playlists/${playlist.id}/courses?user_id=${user.value.id}`);
+          const data = await response.json();
+          if (data.success) {
+            // Преобразуем данные в нужный формат
+            const courses = Array.isArray(data.data) ? data.data : [];
+            selectedPlaylist.value = {
+              ...playlist,
+              courses: courses.map(course => ({
+                id: course.id,
+                title: course.title,
+                rating: Number(course.rating),
+                reviewsCount: course.review_count,
+                price: course.price === "Бесплатно" ? 0 : 
+                       parseFloat(course.price?.replace(/[^\d.]/g, '')) || 0,
+                url: course.url,
+                description: course.description,
+                platform: course.platform_name
+              }))
+            };
+            console.log('Loaded courses:', selectedPlaylist.value.courses); // Для отладки
+          } else {
+            throw new Error(data.message || 'Failed to fetch playlist courses');
+          }
+        } catch (error) {
+          console.error('Error fetching playlist courses:', error);
+          selectedPlaylist.value.courses = []; // Устанавливаем пустой массив в случае ошибки
+          toast.error('Не удалось загрузить курсы из подборки');
+        }
+      }
+    };
+
+    const closePlaylistDetails = () => {
+      selectedPlaylist.value = null;
+    };
+
+    const fetchPlaylists = async () => {
+      if (!user.value?.id) return;
+      try {
+        await playlistsStore.fetchUserPlaylists();
+        playlists.value = playlistsStore.getUserPlaylists;
+      } catch (error) {
+        console.error('Error fetching playlists:', error);
+        playlists.value = [];
+        toast.error('Не удалось загрузить подборки');
+      }
+    };
+
+    // Загрузка данных при монтировании компонента
     onMounted(() => {
       fetchFavorites();
       const tabFromUrl = route.query.tab;
       if (tabFromUrl && ['recent', 'favorites', 'collections', 'settings'].includes(tabFromUrl)) {
         activeTab.value = tabFromUrl;
+      }
+      fetchPlaylists();
+    });
+
+    // Добавляем watch для отслеживания изменения activeTab
+    watch(activeTab, (newTab) => {
+      if (newTab === 'collections') {
+        fetchPlaylists();
+      } else if (newTab === 'favorites') {
+        fetchFavorites();
       }
     });
 
@@ -455,7 +603,13 @@ export default {
       profileForm,
       passwordForm,
       profileErrors,
-      clearProfileError
+      clearProfileError,
+      playlists,
+      selectedPlaylist,
+      truncateText,
+      showPlaylistDetails,
+      closePlaylistDetails,
+      isFavorite
     };
   }
 };
@@ -1079,5 +1233,107 @@ export default {
 .required {
   color: #ef4444;
   margin-left: 2px;
+}
+
+/* Playlists Grid */
+.playlists-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.playlist-card {
+  background: white;
+  border-radius: 8px;
+  padding: 20px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.playlist-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+}
+
+.playlist-title {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 10px 0;
+  color: #1f2937;
+}
+
+.playlist-description {
+  font-size: 14px;
+  color: #6b7280;
+  margin: 0 0 15px 0;
+  line-height: 1.4;
+  height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.playlist-meta {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  color: #4b5563;
+}
+
+.course-count {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.course-count i {
+  font-size: 12px;
+}
+
+/* Expanded Playlist */
+.expanded-playlist {
+  background: white;
+  border-radius: 16px;
+  padding: 30px;
+  max-width: 900px;
+  width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+}
+
+.expanded-playlist .expanded-title {
+  font-size: 24px;
+  font-weight: 600;
+  margin-bottom: 15px;
+  color: #1f2937;
+}
+
+.expanded-playlist .expanded-description {
+  font-size: 16px;
+  color: #4b5563;
+  margin-bottom: 30px;
+  line-height: 1.6;
+}
+
+.playlist-courses h4 {
+  font-size: 18px;
+  margin-bottom: 20px;
+  color: #1f2937;
+}
+
+.expanded-playlist .courses-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+
+@media (max-width: 768px) {
+  .expanded-playlist {
+    padding: 20px;
+    width: 95vw;
+  }
 }
 </style>

@@ -56,6 +56,14 @@
           >
             <i :class="[isFavorite(course.id) ? 'fas' : 'far', 'fa-heart']" :style="{ color: isFavorite(course.id) ? '#ef4444' : '#aaa' }"></i>
           </button>
+
+          <!-- Добавляем компонент выпадающего списка подборок -->
+          <PlaylistDropdown 
+            v-if="user"
+            :course-id="course.id"
+            @click.stop
+          />
+
           <div class="course-platform">{{ course.platform }}</div>
           <div class="course-info">
             <h3 class="course-title">{{ course.title }}</h3>
@@ -83,9 +91,13 @@
 import { ref, onMounted, computed } from 'vue';
 import http from '@/services/http';
 import { useAuthStore } from '@/store/auth';
+import PlaylistDropdown from '@/components/PlaylistDropdown.vue';
 
 export default {
   name: 'HomePage',
+  components: {
+    PlaylistDropdown
+  },
   setup() {
     const authStore = useAuthStore();
     const user = computed(() => authStore.user);
@@ -271,7 +283,8 @@ export default {
       closeExpanded,
       addToFavorites,
       removeFromFavorites,
-      isFavorite
+      isFavorite,
+      user
     };
   }
 };

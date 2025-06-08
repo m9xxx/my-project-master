@@ -184,6 +184,14 @@
             >
               <i :class="[isFavorite(course.id) ? 'fas' : 'far', 'fa-heart']" :style="{ color: isFavorite(course.id) ? '#ef4444' : '#aaa' }"></i>
             </button>
+
+            <!-- Добавляем компонент выпадающего списка подборок -->
+            <PlaylistDropdown 
+              v-if="user"
+              :course-id="course.id"
+              @click.stop
+            />
+
             <div class="course-platform">{{ course.platform }}</div>
             <div class="course-info">
               <h3 class="course-title">{{ course.title }}</h3>
@@ -230,6 +238,147 @@
           </button>
         </div>
       </div>
+
+      <!-- Подборки справа -->
+      <div class="playlists-sidebar" v-if="user">
+        <div class="playlists-header">
+          <h2>Подборки</h2>
+          <div class="playlists-count" v-if="filteredPlaylists.length">
+            Найдено: {{ filteredPlaylists.length }} {{ getNoun(filteredPlaylists.length, 'подборка', 'подборки', 'подборок') }}
+          </div>
+        </div>
+
+        <div v-if="filteredPlaylists.length > 0" class="playlists-list">
+          <div 
+            v-for="playlist in filteredPlaylists" 
+            :key="playlist.id" 
+            class="playlist-card"
+            @click="showPlaylistDetails(playlist)"
+          >
+            <h3 class="playlist-title">{{ playlist.name }}</h3>
+            <p class="playlist-description">{{ playlist.description || 'Без описания' }}</p>
+            <div class="playlist-meta">
+              <span class="courses-count">
+                <i class="fas fa-book"></i>
+                {{ playlist.course_count }} {{ getNoun(playlist.course_count, 'курс', 'курса', 'курсов') }}
+              </span>
+              <span class="author" v-if="playlist.author_name">
+                <i class="fas fa-user"></i>
+                {{ playlist.author_name }}
+              </span>
+            </div>
+          </div>
+        </div>
+        <div v-else class="no-playlists">
+          <p>Подборок не найдено</p>
+        </div>
+
+        <!-- Модальное окно с деталями подборки -->
+        <div v-if="selectedPlaylist" class="overlay" @click.self="closePlaylistDetails">
+          <div class="expanded-playlist">
+            <button class="close-btn" @click="closePlaylistDetails">×</button>
+            
+            <div class="playlist-header">
+              <h3 class="expanded-title">{{ selectedPlaylist.name }}</h3>
+              <div class="playlist-meta-info">
+                <span class="courses-count">
+                  <i class="fas fa-book"></i>
+                  {{ selectedPlaylist.course_count }} {{ getNoun(selectedPlaylist.course_count, 'курс', 'курса', 'курсов') }}
+                </span>
+                <span class="author" v-if="selectedPlaylist.author_name">
+                  <i class="fas fa-user"></i>
+                  {{ selectedPlaylist.author_name }}
+                </span>
+              </div>
+              <p class="expanded-description">{{ selectedPlaylist.description || 'Без описания' }}</p>
+            </div>
+            
+            <div class="playlist-courses">
+              <h4>Курсы в подборке</h4>
+              <div v-if="selectedPlaylist.courses && selectedPlaylist.courses.length > 0" class="playlist-courses-list">
+                <!-- Expanded course card -->
+                <div v-if="selectedPlaylistCourse" class="expanded-playlist-course">
+                  <button class="back-btn" @click="selectedPlaylistCourse = null">
+                    <i class="fas fa-arrow-left"></i> Назад к списку
+                  </button>
+                  <h3 class="expanded-title">{{ selectedPlaylistCourse.title }}</h3>
+                  <p class="expanded-description">{{ selectedPlaylistCourse.description }}</p>
+                  <div class="expanded-meta">
+                    <div class="meta-item">
+                      <i class="fas fa-star"></i>
+                      <span>{{ selectedPlaylistCourse.rating }}</span>
+                    </div>
+                    <div class="meta-item">
+                      <i class="fas fa-comment"></i>
+                      <span>{{ formatStudentCount(selectedPlaylistCourse.reviewsCount) }} отзывов</span>
+                    </div>
+                    <div class="meta-item price" :class="{ 'free': selectedPlaylistCourse.price === 0 }">
+                      {{ selectedPlaylistCourse.price === 0 ? 'Бесплатно' : `${formatPrice(selectedPlaylistCourse.price)} ₽` }}
+                    </div>
+                  </div>
+                  <div class="expanded-actions">
+                    <button
+                      class="action-btn favorite"
+                      @click="isFavorite(selectedPlaylistCourse.id) ? removeFromFavorites(selectedPlaylistCourse.id) : addToFavorites(selectedPlaylistCourse.id)"
+                    >
+                      <i :class="[isFavorite(selectedPlaylistCourse.id) ? 'fas' : 'far', 'fa-heart']"></i>
+                      {{ isFavorite(selectedPlaylistCourse.id) ? 'В избранном' : 'В избранное' }}
+                    </button>
+                    <a :href="selectedPlaylistCourse.url" target="_blank" class="action-btn primary">
+                      <i class="fas fa-external-link-alt"></i>
+                      Перейти к курсу
+                    </a>
+                  </div>
+                </div>
+                
+                <!-- Course list -->
+                <div v-else class="playlist-courses-grid">
+                  <div 
+                    v-for="course in selectedPlaylist.courses" 
+                    :key="course.id" 
+                    class="playlist-course-item"
+                  >
+                    <div class="course-main-info" @click="selectedPlaylistCourse = course">
+                      <div class="course-basic-info">
+                        <div class="platform-badge">{{ course.platform }}</div>
+                        <h3 class="course-title">{{ course.title }}</h3>
+                      </div>
+                      <div class="course-stats">
+                        <span class="rating">
+                          <i class="fas fa-star"></i>
+                          {{ course.rating }}
+                        </span>
+                        <span class="reviews">
+                          <i class="fas fa-comment"></i>
+                          {{ formatStudentCount(course.reviewsCount) }}
+                        </span>
+                        <span class="price" :class="{ 'free': course.price === 0 }">
+                          {{ course.price === 0 ? 'Бесплатно' : `${formatPrice(course.price)} ₽` }}
+                        </span>
+                      </div>
+                    </div>
+                    <div class="course-actions">
+                      <button
+                        class="favorite-btn"
+                        @click.stop="isFavorite(course.id) ? removeFromFavorites(course.id) : addToFavorites(course.id)"
+                        :aria-label="isFavorite(course.id) ? 'Убрать из избранного' : 'В избранное'"
+                      >
+                        <i :class="[isFavorite(course.id) ? 'fas' : 'far', 'fa-heart']" :style="{ color: isFavorite(course.id) ? '#ef4444' : '#aaa' }"></i>
+                      </button>
+                      <a :href="course.url" target="_blank" class="btn-link">
+                        <i class="fas fa-external-link-alt"></i>
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="empty-state">
+                <p>В этой подборке пока нет курсов</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -238,9 +387,13 @@
 import { ref, computed, onMounted, watch } from 'vue';
 import http from '@/services/http';
 import { useAuthStore } from '@/store/auth';
+import PlaylistDropdown from '@/components/PlaylistDropdown.vue';
 
 export default {
   name: 'SearchPage',
+  components: {
+    PlaylistDropdown
+  },
   setup() {
     // Состояние поиска
     const searchQuery = ref('');
@@ -619,8 +772,13 @@ export default {
     
     // Наблюдатель за изменением поискового запроса
     watch(searchQuery, (newValue, oldValue) => {
-      if (newValue !== oldValue && oldValue) {
-        performSearch();
+      if (newValue !== oldValue) {
+        performSearch(); // Поиск курсов
+        if (newValue.trim()) { // Ищем подборки только если есть поисковый запрос
+          fetchPlaylists();
+        } else {
+          playlists.value = []; // Очищаем список подборок если поисковая строка пуста
+        }
       }
     });
     
@@ -657,7 +815,109 @@ export default {
     const closeExpanded = () => {
       selectedCourse.value = null;
     };
-    
+
+    const playlists = ref([]);
+    const selectedPlaylist = ref(null);
+    const selectedPlaylistCourse = ref(null);
+    const filteredPlaylists = computed(() => {
+      return playlists.value;  // Убираем локальную фильтрацию, так как теперь фильтрация происходит на бэкенде
+    });
+
+    const showPlaylistDetails = async (playlist) => {
+      try {
+        // Получаем актуальную информацию о пользователе
+        const userResponse = await fetch(`http://localhost/stepik_parser_test/public/api/v1/users/${playlist.user_id}`);
+        const userData = await userResponse.json();
+        
+        selectedPlaylist.value = {
+          ...playlist,
+          author_name: userData.success ? userData.data.name : 'Пользователь не найден'
+        };
+        selectedPlaylistCourse.value = null;
+        
+        if (!playlist.courses) {
+          const response = await fetch(`http://localhost/stepik_parser_test/public/api/v1/playlists/${playlist.id}/courses?user_id=${user.value.id}`);
+          const data = await response.json();
+          if (data.success) {
+            const courses = Array.isArray(data.data) ? data.data : [];
+            selectedPlaylist.value = {
+              ...selectedPlaylist.value,
+              courses: courses.map(course => ({
+                id: course.id,
+                title: course.title,
+                rating: Number(course.rating),
+                reviewsCount: course.review_count,
+                price: course.price === "Бесплатно" ? 0 : 
+                       parseFloat(course.price?.replace(/[^\d.]/g, '')) || 0,
+                url: course.url,
+                description: course.description,
+                platform: course.platform_name
+              }))
+            };
+          }
+        }
+      } catch (error) {
+        console.error('Error loading playlist details:', error);
+        selectedPlaylist.value = {
+          ...playlist,
+          author_name: 'Ошибка загрузки',
+          courses: []
+        };
+        toast.error('Не удалось загрузить детали подборки');
+      }
+    };
+
+    const closePlaylistDetails = () => {
+      selectedPlaylist.value = null;
+      selectedPlaylistCourse.value = null; // Reset selected course when closing playlist
+    };
+
+    const fetchPlaylists = async () => {
+      try {
+        const searchParam = searchQuery.value.trim() ? `?search=${encodeURIComponent(searchQuery.value.trim())}` : '';
+        const response = await fetch(`http://localhost/stepik_parser_test/public/api/v1/playlists/search${searchParam}`);
+        const data = await response.json();
+        if (data.success) {
+          // Сначала получаем все уникальные user_id из плейлистов
+          const userIds = [...new Set((data.data || []).map(playlist => playlist.user_id))];
+          
+          // Получаем информацию о пользователях
+          const usersResponse = await fetch(`http://localhost/stepik_parser_test/public/api/v1/users?ids=${userIds.join(',')}`);
+          const usersData = await usersResponse.json();
+          const users = usersData.success ? usersData.data : [];
+          
+          // Создаем мапу пользователей для быстрого доступа
+          const usersMap = new Map(users.map(user => [user.id, user]));
+          
+          // Маппим плейлисты с информацией о пользователях
+          playlists.value = (data.data || []).map(playlist => ({
+            ...playlist,
+            author_name: usersMap.get(playlist.user_id)?.name || 'Пользователь не найден',
+            course_count: playlist.course_count || 0
+          }));
+        }
+      } catch (error) {
+        console.error('Error fetching playlists:', error);
+        playlists.value = [];
+      }
+    };
+
+    const getNoun = (number, one, two, five) => {
+      let n = Math.abs(number);
+      n %= 100;
+      if (n >= 5 && n <= 20) {
+        return five;
+      }
+      n %= 10;
+      if (n === 1) {
+        return one;
+      }
+      if (n >= 2 && n <= 4) {
+        return two;
+      }
+      return five;
+    };
+
     return {
       // Состояние
       searchQuery,
@@ -694,7 +954,14 @@ export default {
       removeFromFavorites,
       favorites,
       coursesPerPage,
-      changeItemsPerPage
+      changeItemsPerPage,
+      user,
+      filteredPlaylists,
+      selectedPlaylist,
+      selectedPlaylistCourse,
+      showPlaylistDetails,
+      closePlaylistDetails,
+      getNoun
     };
   }
 };
@@ -702,7 +969,7 @@ export default {
 
 <style lang="scss" scoped>
 .search-page-container {
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 0 20px;
 }
@@ -757,7 +1024,8 @@ export default {
 }
 
 .search-content {
-  display: flex;
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 300px;
   gap: 30px;
   margin-bottom: 50px;
 }
@@ -1218,36 +1486,455 @@ export default {
   background: #f3f4f6;
 }
 
-@media (max-width: 768px) {
-  .search-content {
+.playlists-sidebar {
+  .playlists-header {
+    margin-bottom: 20px;
+    h2 {
+      font-size: 20px;
+      color: #1f2937;
+      margin-bottom: 10px;
+    }
+    .playlists-count {
+      font-size: 14px;
+      color: #6b7280;
+    }
+  }
+
+  .playlist-card {
+    background: white;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 15px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+    display: flex;
     flex-direction: column;
-  }
-  
-  .filters-sidebar {
-    width: 100%;
-  }
-  
-  .courses-grid {
-    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-  }
-  
-  .pagination {
-    .pagination-numbers {
-      button {
-        width: 35px;
-        height: 35px;
-        margin: 0 3px;
+    min-height: 120px;
+
+    &:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .playlist-title {
+      font-size: 16px;
+      font-weight: 600;
+      color: #1f2937;
+      margin-bottom: 5px;
+    }
+
+    .playlist-description {
+      font-size: 14px;
+      color: #6b7280;
+      margin-bottom: 10px;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+      flex-grow: 1;
+    }
+
+    .playlist-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: auto;
+
+      .courses-count {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        
+        i {
+          font-size: 14px;
+        }
+      }
+
+      .author {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        color: #4b5563;
+        
+        i {
+          font-size: 12px;
+        }
       }
     }
   }
+
+  .no-playlists {
+    text-align: center;
+    padding: 20px;
+    background: #f9fafb;
+    border-radius: 8px;
+    color: #6b7280;
+  }
+}
+
+@media (max-width: 1200px) {
+  .search-content {
+    grid-template-columns: 280px 1fr;
+    .playlists-sidebar {
+      display: none;
+    }
+  }
+}
+
+@media (max-width: 768px) {
+  .search-content {
+    grid-template-columns: 1fr;
+  }
   
-  .results-header {
-    flex-direction: column;
-    align-items: flex-start;
-    
-    .sorting-options {
-      width: 100%;
+  .filters-sidebar {
+    display: none;
+  }
+}
+
+.expanded-playlist {
+  background: white;
+  border-radius: 16px;
+  padding: 0;
+  max-width: 1000px;
+  width: 90vw;
+  max-height: 90vh;
+  overflow-y: auto;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+
+  .close-btn {
+    position: absolute;
+    top: 20px;
+    right: 20px;
+    background: none;
+    border: none;
+    font-size: 28px;
+    color: #6b7280;
+    cursor: pointer;
+    z-index: 10;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: all 0.2s;
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.05);
+      color: #111827;
+    }
+  }
+
+  .playlist-header {
+    padding: 30px;
+    background: #f8fafc;
+    border-bottom: 1px solid #e5e7eb;
+
+    .expanded-title {
+      font-size: 24px;
+      font-weight: 600;
+      color: #111827;
+      margin-bottom: 12px;
+    }
+
+    .playlist-meta-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 16px;
+      font-size: 14px;
+      color: #6b7280;
+
+      .courses-count, .author {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+
+        i {
+          font-size: 14px;
+        }
+      }
+
+      .author {
+        color: #4b5563;
+        font-weight: 500;
+      }
+    }
+
+    .expanded-description {
+      font-size: 16px;
+      line-height: 1.5;
+      color: #4b5563;
+      margin: 0;
+    }
+  }
+
+  .playlist-courses {
+    padding: 30px;
+
+    .expanded-playlist-course {
+      background: white;
+      border-radius: 8px;
+      padding: 24px;
+      border: 1px solid #e5e7eb;
+
+      .back-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 0;
+        background: none;
+        border: none;
+        color: #6b7280;
+        font-size: 14px;
+        cursor: pointer;
+        margin-bottom: 16px;
+        transition: color 0.2s;
+
+        &:hover {
+          color: #111827;
+        }
+      }
+
+      .expanded-title {
+        font-size: 20px;
+        font-weight: 600;
+        color: #111827;
+        margin-bottom: 12px;
+      }
+
+      .expanded-description {
+        font-size: 14px;
+        line-height: 1.6;
+        color: #4b5563;
+        margin-bottom: 20px;
+      }
+
+      .expanded-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 20px;
+        margin-bottom: 24px;
+
+        .meta-item {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          color: #6b7280;
+          font-size: 14px;
+
+          &.price {
+            font-weight: 600;
+            color: #111827;
+
+            &.free {
+              color: #059669;
+            }
+          }
+
+          i {
+            font-size: 14px;
+          }
+        }
+      }
+
+      .expanded-actions {
+        display: flex;
+        gap: 12px;
+
+        .action-btn {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+          padding: 10px 20px;
+          border-radius: 6px;
+          font-size: 14px;
+          font-weight: 500;
+          cursor: pointer;
+          transition: all 0.2s;
+          text-decoration: none;
+
+          &.favorite {
+            background: #f3f4f6;
+            border: 1px solid #e5e7eb;
+            color: #6b7280;
+
+            &:hover {
+              background: #e5e7eb;
+              color: #111827;
+            }
+          }
+
+          &.primary {
+            background: #2563eb;
+            border: 1px solid #2563eb;
+            color: white;
+
+            &:hover {
+              background: #1d4ed8;
+            }
+          }
+        }
+      }
+    }
+
+    .playlist-courses-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .playlist-course-item {
+      display: flex;
+      align-items: center;
       justify-content: space-between;
+      padding: 12px;
+      background: white;
+      border: 1px solid #e5e7eb;
+      border-radius: 8px;
+      transition: all 0.2s;
+
+      &:hover {
+        border-color: #d1d5db;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+      }
+
+      .course-main-info {
+        flex: 1;
+        min-width: 0;
+        cursor: pointer;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .course-basic-info {
+        flex: 1;
+        min-width: 0;
+
+        .course-author {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 12px;
+          color: #6b7280;
+          margin-top: 4px;
+
+          i {
+            font-size: 10px;
+          }
+        }
+      }
+
+      .course-stats {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        font-size: 13px;
+        color: #6b7280;
+        white-space: nowrap;
+
+        span {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+
+          i {
+            font-size: 12px;
+          }
+        }
+
+        .price {
+          font-weight: 600;
+          color: #111827;
+
+          &.free {
+            color: #059669;
+          }
+        }
+      }
+
+      .course-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: 16px;
+
+        .favorite-btn, .btn-link {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 32px;
+          height: 32px;
+          border: none;
+          background: #f3f4f6;
+          border-radius: 6px;
+          color: #6b7280;
+          cursor: pointer;
+          transition: all 0.2s;
+
+          &:hover {
+            background: #e5e7eb;
+            color: #111827;
+          }
+        }
+
+        .favorite-btn {
+          &:hover i {
+            color: #ef4444 !important;
+          }
+        }
+
+        .btn-link {
+          text-decoration: none;
+
+          &:hover {
+            color: #2563eb;
+          }
+        }
+      }
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      background: #f9fafb;
+      border-radius: 8px;
+      color: #6b7280;
+    }
+  }
+}
+
+@media (max-width: 640px) {
+  .expanded-playlist {
+    width: 100vw;
+    height: 100vh;
+    max-height: 100vh;
+    border-radius: 0;
+
+    .playlist-header {
+      padding: 20px;
+    }
+
+    .playlist-courses {
+      padding: 20px;
+
+      .playlist-courses-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .expanded-playlist-course {
+      .expanded-actions {
+        flex-direction: column;
+      }
     }
   }
 }
