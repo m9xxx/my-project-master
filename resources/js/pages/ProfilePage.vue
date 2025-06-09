@@ -520,11 +520,13 @@ export default {
       // Если курсы еще не загружены, загружаем их
       if (!playlist.courses) {
         try {
-          const response = await fetch(`http://localhost/stepik_parser_test/public/api/v1/playlists/${playlist.id}/courses?user_id=${user.value.id}`);
-          const data = await response.json();
-          if (data.success) {
+          const response = await http.get(`/playlists/${playlist.id}/courses`, {
+            params: { user_id: user.value.id }
+          });
+          
+          if (response.data.success) {
             // Преобразуем данные в нужный формат
-            const courses = Array.isArray(data.data) ? data.data : [];
+            const courses = Array.isArray(response.data.data) ? response.data.data : [];
             selectedPlaylist.value = {
               ...playlist,
               courses: courses.map(course => ({
@@ -539,9 +541,8 @@ export default {
                 platform: course.platform_name
               }))
             };
-            console.log('Loaded courses:', selectedPlaylist.value.courses); // Для отладки
           } else {
-            throw new Error(data.message || 'Failed to fetch playlist courses');
+            throw new Error(response.data.message || 'Failed to fetch playlist courses');
           }
         } catch (error) {
           console.error('Error fetching playlist courses:', error);

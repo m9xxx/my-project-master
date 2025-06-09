@@ -825,21 +825,19 @@ export default {
 
     const showPlaylistDetails = async (playlist) => {
       try {
-        // Получаем актуальную информацию о пользователе
-        const userResponse = await fetch(`http://localhost/stepik_parser_test/public/api/v1/users/${playlist.user_id}`);
-        const userData = await userResponse.json();
-        
         selectedPlaylist.value = {
           ...playlist,
-          author_name: userData.success ? userData.data.name : 'Пользователь не найден'
+          author_name: playlist.username || 'Пользователь не найден'
         };
         selectedPlaylistCourse.value = null;
         
         if (!playlist.courses) {
-          const response = await fetch(`http://localhost/stepik_parser_test/public/api/v1/playlists/${playlist.id}/courses?user_id=${user.value.id}`);
-          const data = await response.json();
-          if (data.success) {
-            const courses = Array.isArray(data.data) ? data.data : [];
+          const response = await http.get(`/playlists/${playlist.id}/courses`, {
+            params: { user_id: user.value.id }
+          });
+          
+          if (response.data.success) {
+            const courses = Array.isArray(response.data.data) ? response.data.data : [];
             selectedPlaylist.value = {
               ...selectedPlaylist.value,
               courses: courses.map(course => ({
@@ -854,6 +852,8 @@ export default {
                 platform: course.platform_name
               }))
             };
+          } else {
+            throw new Error(response.data.message || 'Failed to fetch playlist courses');
           }
         }
       } catch (error) {
@@ -875,30 +875,22 @@ export default {
     const fetchPlaylists = async () => {
       try {
         const searchParam = searchQuery.value.trim() ? `?search=${encodeURIComponent(searchQuery.value.trim())}` : '';
-        const response = await fetch(`http://localhost/stepik_parser_test/public/api/v1/playlists/search${searchParam}`);
-        const data = await response.json();
-        if (data.success) {
-          // Сначала получаем все уникальные user_id из плейлистов
-          const userIds = [...new Set((data.data || []).map(playlist => playlist.user_id))];
-          
-          // Получаем информацию о пользователях
-          const usersResponse = await fetch(`http://localhost/stepik_parser_test/public/api/v1/users?ids=${userIds.join(',')}`);
-          const usersData = await usersResponse.json();
-          const users = usersData.success ? usersData.data : [];
-          
-          // Создаем мапу пользователей для быстрого доступа
-          const usersMap = new Map(users.map(user => [user.id, user]));
-          
-          // Маппим плейлисты с информацией о пользователях
-          playlists.value = (data.data || []).map(playlist => ({
+        const response = await http.get(`/playlists/search${searchParam}`);
+        
+        if (response.data.success) {
+          // Используем username, который приходит сразу с данными подборки
+          playlists.value = (response.data.data || []).map(playlist => ({
             ...playlist,
-            author_name: usersMap.get(playlist.user_id)?.name || 'Пользователь не найден',
+            author_name: playlist.username || 'Пользователь не найден',
             course_count: playlist.course_count || 0
           }));
+        } else {
+          throw new Error(response.data.message || 'Failed to fetch playlists');
         }
       } catch (error) {
         console.error('Error fetching playlists:', error);
         playlists.value = [];
+        toast.error('Не удалось загрузить подборки');
       }
     };
 
